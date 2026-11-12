@@ -100,15 +100,15 @@
                 <p>Small steps every day lead to big achievements.</p>
             </div>
 
-            <a href="#" class="nav-link">
-                <i data-lucide="settings"></i>
-                <span>Settings</span>
-            </a>
+            <a href="{{ url_for('settings') }}" class="nav-link">
+    <i data-lucide="settings"></i>
+    <span>Settings</span>
+</a>
 
-            <a href="#" class="nav-link">
-                <i data-lucide="user-round"></i>
-                <span>My Profile</span>
-            </a>
+            <a href="{{ url_for('profile') }}" class="nav-link">
+    <i data-lucide="user-round"></i>
+    <span>My Profile</span>
+</a>
 
         </div>
 

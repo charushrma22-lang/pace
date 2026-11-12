@@ -1,6 +1,7 @@
-
+import os
 from pathlib import Path
 from datetime import datetime, timedelta
+from sqlalchemy import inspect, text
 
 from flask import (
     Flask, jsonify, render_template, request,
@@ -32,10 +33,32 @@ Path(app.instance_path).mkdir(parents=True, exist_ok=True)
 # 2. APPLICATION CONFIGURATION
 # ==========================================
 
-app.config["SECRET_KEY"] = "pace-development-secret-key"
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///pace.db"
-app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["SECRET_KEY"] = os.environ.get(
+    "SECRET_KEY",
+    "pace-development-secret-key"
+)
 
+database_url = os.environ.get("DATABASE_URL")
+
+if database_url:
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace(
+            "postgres://",
+            "postgresql+psycopg://",
+            1
+        )
+    elif database_url.startswith("postgresql://"):
+        database_url = database_url.replace(
+            "postgresql://",
+            "postgresql+psycopg://",
+            1
+        )
+
+app.config["SQLALCHEMY_DATABASE_URI"] = (
+    database_url or "sqlite:///pace.db"
+)
+
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 # ==========================================
 # 3. DATABASE INITIALIZATION
@@ -87,6 +110,7 @@ class User(UserMixin, db.Model):
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
+
 # ==========================================
 # 5. HABIT MODEL
 # ==========================================
@@ -94,6 +118,13 @@ class User(UserMixin, db.Model):
 class Habit(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
+
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id"),
+        nullable=True
+    )
+
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.String(250))
 
@@ -137,6 +168,7 @@ class HabitLog(db.Model):
     )
 
 
+
 # ==========================================
 # 6. TASK MODEL
 # ==========================================
@@ -144,6 +176,12 @@ class HabitLog(db.Model):
 class Task(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
+
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id"),
+        nullable=True
+    )
 
     title = db.Column(db.String(150), nullable=False)
 
@@ -166,13 +204,32 @@ class Task(db.Model):
         default=db.func.current_timestamp()
     )
 
+
+
+# ==========================================
+# FOCUS SESSION MODEL
+# ==========================================
+
 class FocusSession(db.Model):
+
     id = db.Column(db.Integer, primary_key=True)
-    duration_minutes = db.Column(db.Integer, nullable=False)
+
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id"),
+        nullable=True
+    )
+
+    duration_minutes = db.Column(
+        db.Integer,
+        nullable=False
+    )
+
     completed_at = db.Column(
         db.DateTime,
         default=db.func.current_timestamp()
     )
+
 
 
 # ==========================================
@@ -301,9 +358,12 @@ def health_check():
 # ==========================================
 
 @app.route("/api/habits", methods=["GET"])
+@login_required
 def get_habits():
 
-    habits = Habit.query.order_by(Habit.id.desc()).all()
+    habits = Habit.query.filter_by(
+        user_id=current_user.id
+    ).order_by(Habit.id.desc()).all()
 
     return jsonify([
         {
@@ -316,11 +376,9 @@ def get_habits():
     ]), 200
 
 
-# ==========================================
-# 10. ADD A HABIT
-# ==========================================
 
 @app.route("/api/habits", methods=["POST"])
+@login_required
 def add_habit():
 
     data = request.get_json(silent=True)
@@ -345,6 +403,7 @@ def add_habit():
         description = ""
 
     new_habit = Habit(
+        user_id=current_user.id,
         name=name.strip(),
         description=description.strip()
     )
@@ -364,6 +423,7 @@ def add_habit():
     }), 201
 
 
+
 # ==========================================
 # 11. UPDATE HABIT COMPLETION
 # ==========================================
@@ -371,11 +431,15 @@ def add_habit():
 
 
 @app.route("/api/habits/<int:habit_id>", methods=["PATCH"])
+@login_required
 def update_habit(habit_id):
 
-    habit = db.session.get(Habit, habit_id)
+    habit = Habit.query.filter_by(
+        id=habit_id,
+        user_id=current_user.id
+    ).first()
 
-    if habit is None:
+    if not habit:
         return jsonify({
             "status": "error",
             "message": "Habit not found."
@@ -383,66 +447,61 @@ def update_habit(habit_id):
 
     data = request.get_json(silent=True)
 
-    if not isinstance(data, dict):
+    if not isinstance(data, dict) or "completed" not in data:
         return jsonify({
             "status": "error",
-            "message": "Please send valid JSON data."
+            "message": "Invalid request data."
         }), 400
 
-    completed = data.get("completed")
-
-    if not isinstance(completed, bool):
+    if not isinstance(data["completed"], bool):
         return jsonify({
             "status": "error",
-            "message": "Completed must be true or false."
+            "message": "Invalid completion status."
         }), 400
 
-    # Update today's habit status
-    habit.completed = completed
+    habit.completed = data["completed"]
 
-    # Find today's history record
-    today = datetime.now().date()
+    today = datetime.today().date()
 
     log = HabitLog.query.filter_by(
         habit_id=habit.id,
         log_date=today
     ).first()
 
-    # Create a new record if one doesn't exist
-    if log is None:
+    if log:
+        log.completed = habit.completed
+    else:
         log = HabitLog(
             habit_id=habit.id,
             log_date=today,
-            completed=completed
+            completed=habit.completed
         )
         db.session.add(log)
-
-    else:
-        log.completed = completed
 
     db.session.commit()
 
     return jsonify({
         "status": "success",
         "message": "Habit updated successfully!"
-    }), 200
+    })
 
-
-
-# ==========================================
-# 12. DELETE A HABIT
-# ==========================================
 
 @app.route("/api/habits/<int:habit_id>", methods=["DELETE"])
+@login_required
 def delete_habit(habit_id):
 
-    habit = db.session.get(Habit, habit_id)
+    habit = Habit.query.filter_by(
+        id=habit_id,
+        user_id=current_user.id
+    ).first()
 
-    if habit is None:
+    if not habit:
         return jsonify({
             "status": "error",
             "message": "Habit not found."
         }), 404
+
+    HabitLog.query.filter_by(habit_id=habit.id).delete()
 
     db.session.delete(habit)
     db.session.commit()
@@ -450,12 +509,14 @@ def delete_habit(habit_id):
     return jsonify({
         "status": "success",
         "message": "Habit deleted successfully!"
-    }), 200
+    })
+
 # ==========================================
 # 12A. GET HABIT HISTORY FOR A DATE
 # ==========================================
 
 @app.route("/api/habit-history", methods=["GET"])
+@login_required
 def get_habit_history():
 
     date_value = request.args.get("date")
@@ -476,8 +537,9 @@ def get_habit_history():
             "message": "Invalid date format."
         }), 400
 
-    logs = HabitLog.query.filter_by(
-        log_date=selected_date
+    logs = HabitLog.query.join(Habit).filter(
+        Habit.user_id == current_user.id,
+        HabitLog.log_date == selected_date
     ).all()
 
     return jsonify([
@@ -494,6 +556,7 @@ def get_habit_history():
 # ==========================================
 
 @app.route("/api/habit-history", methods=["POST"])
+@login_required
 def save_habit_history():
 
     data = request.get_json(silent=True)
@@ -530,7 +593,10 @@ def save_habit_history():
             "message": "Invalid date."
         }), 400
 
-    habit = db.session.get(Habit, habit_id)
+    habit = Habit.query.filter_by(
+        id=habit_id,
+        user_id=current_user.id
+    ).first()
 
     if habit is None:
         return jsonify({
@@ -553,7 +619,6 @@ def save_habit_history():
     else:
         log.completed = completed
 
-    # Keep the existing dashboard status in sync for today only.
     if selected_date == datetime.now().date():
         habit.completed = completed
 
@@ -564,19 +629,22 @@ def save_habit_history():
         "message": "Habit history saved successfully."
     }), 200
 
+
 # ==========================================
 # STREAKS AND REWARDS API
 # ==========================================
 
 @app.route("/api/streaks", methods=["GET"])
+@login_required
 def get_streaks():
 
     today = datetime.now().date()
 
-    # Get all completed habit logs
-    logs = HabitLog.query.filter_by(completed=True).all()
+    logs = HabitLog.query.join(Habit).filter(
+        Habit.user_id == current_user.id,
+        HabitLog.completed == True
+    ).all()
 
-    # Group completed dates by habit
     all_dates = set()
     habit_dates = {}
 
@@ -621,12 +689,15 @@ def get_streaks():
     # Calculate individual habit streaks
     habit_streaks = []
 
-    habits = Habit.query.all()
+    habits = Habit.query.filter_by(
+        user_id=current_user.id
+    ).all()
 
     for habit in habits:
         dates = habit_dates.get(habit.id, set())
 
         habit_start = today
+
         if today not in dates:
             habit_start = today - timedelta(days=1)
 
@@ -705,9 +776,12 @@ def task_to_dict(task):
 # ==========================================
 
 @app.route("/api/tasks", methods=["GET"])
+@login_required
 def get_tasks():
 
-    tasks = Task.query.order_by(
+    tasks = Task.query.filter_by(
+        user_id=current_user.id
+    ).order_by(
         Task.due_date.asc(),
         Task.id.desc()
     ).all()
@@ -723,6 +797,7 @@ def get_tasks():
 # ==========================================
 
 @app.route("/api/tasks", methods=["POST"])
+@login_required
 def add_task():
 
     data = request.get_json(silent=True)
@@ -769,6 +844,7 @@ def add_task():
             }), 400
 
     new_task = Task(
+        user_id=current_user.id,
         title=title.strip(),
         description=description.strip(),
         due_date=due_date,
@@ -790,9 +866,13 @@ def add_task():
 # ==========================================
 
 @app.route("/api/tasks/<int:task_id>", methods=["PATCH"])
+@login_required
 def update_apptask(task_id):
 
-    task = db.session.get(Task, task_id)
+    task = Task.query.filter_by(
+        id=task_id,
+        user_id=current_user.id
+    ).first()
 
     if task is None:
         return jsonify({
@@ -872,9 +952,13 @@ def update_apptask(task_id):
 # ==========================================
 
 @app.route("/api/tasks/<int:task_id>", methods=["DELETE"])
+@login_required
 def delete_task(task_id):
 
-    task = db.session.get(Task, task_id)
+    task = Task.query.filter_by(
+        id=task_id,
+        user_id=current_user.id
+    ).first()
 
     if task is None:
         return jsonify({
@@ -896,17 +980,29 @@ def delete_task(task_id):
 # ==========================================
 
 @app.route("/api/focus-sessions", methods=["GET", "POST"])
+@login_required
 def focus_sessions():
 
     if request.method == "POST":
-        data = request.get_json()
+
+        data = request.get_json(silent=True)
+
+        if not isinstance(data, dict):
+            return jsonify({
+                "error": "Invalid request data"
+            }), 400
 
         duration = data.get("duration_minutes")
 
         if not isinstance(duration, int) or isinstance(duration, bool) or duration <= 0:
-            return jsonify({"error": "Invalid session duration"}), 400
+            return jsonify({
+                "error": "Invalid session duration"
+            }), 400
 
-        session = FocusSession(duration_minutes=duration)
+        session = FocusSession(
+            user_id=current_user.id,
+            duration_minutes=duration
+        )
 
         db.session.add(session)
         db.session.commit()
@@ -916,11 +1012,14 @@ def focus_sessions():
             "id": session.id
         }), 201
 
-    sessions = FocusSession.query.order_by(
+    sessions = FocusSession.query.filter_by(
+        user_id=current_user.id
+    ).order_by(
         FocusSession.completed_at.desc()
     ).all()
 
     total_sessions = len(sessions)
+
     total_minutes = sum(
         session.duration_minutes for session in sessions
     )
@@ -936,41 +1035,46 @@ def focus_sessions():
 # ==========================================
 
 @app.route("/api/analytics", methods=["GET"])
+@login_required
 def get_analytics():
 
     today = datetime.now().date()
 
-    # Total habits
-    total_habits = Habit.query.count()
-
-    # Total completed habit logs
-    habit_completions = HabitLog.query.filter_by(
-        completed=True
+    total_habits = Habit.query.filter_by(
+        user_id=current_user.id
     ).count()
 
-    # Task statistics
-    total_tasks = Task.query.count()
+    habit_completions = HabitLog.query.join(Habit).filter(
+        Habit.user_id == current_user.id,
+        HabitLog.completed == True
+    ).count()
+
+    total_tasks = Task.query.filter_by(
+        user_id=current_user.id
+    ).count()
 
     completed_tasks = Task.query.filter_by(
+        user_id=current_user.id,
         completed=True
     ).count()
 
-    # Focus statistics
-    focus_sessions = FocusSession.query.all()
+    focus_sessions = FocusSession.query.filter_by(
+        user_id=current_user.id
+    ).all()
 
     focus_minutes = sum(
         session.duration_minutes for session in focus_sessions
     )
 
-    # Weekly habit progress
     weekly_progress = []
 
     for i in range(6, -1, -1):
         day = today - timedelta(days=i)
 
-        completed_count = HabitLog.query.filter_by(
-            log_date=day,
-            completed=True
+        completed_count = HabitLog.query.join(Habit).filter(
+            Habit.user_id == current_user.id,
+            HabitLog.log_date == day,
+            HabitLog.completed == True
         ).count()
 
         weekly_progress.append({
@@ -987,13 +1091,71 @@ def get_analytics():
         "weekly_progress": weekly_progress
     })
 
+# ==========================================
+# PROFILE PAGE
+# ==========================================
+
+@app.route("/profile")
+@login_required
+def profile():
+    return render_template("profile.html")
+# ==========================================
+# SETTINGS PAGE
+# ==========================================
+
+@app.route("/settings")
+@login_required
+def settings():
+    return render_template("settings.html")
+
 
 # ==========================================
 # 18. CREATE DATABASE TABLES
 # ==========================================
 
 with app.app_context():
+
     db.create_all()
+
+    # Add user_id columns to existing tables safely
+    tables = ["habit", "task", "focus_session"]
+
+    with db.engine.begin() as connection:
+
+        for table in tables:
+
+            inspector = inspect(connection)
+
+            columns = [
+                column["name"]
+                for column in inspector.get_columns(table)
+            ]
+
+            if "user_id" not in columns:
+
+                connection.execute(text(
+                    f'ALTER TABLE "{table}" '
+                    'ADD COLUMN user_id INTEGER REFERENCES "user"(id)'
+                ))
+
+        # Find the existing account
+        first_user_id = connection.execute(
+            text("SELECT id FROM user ORDER BY id LIMIT 1")
+        ).scalar()
+
+        # Assign existing records to that account
+        if first_user_id is not None:
+
+            for table in tables:
+
+                connection.execute(
+                    text(
+                        f'UPDATE "{table}" '
+                        'SET user_id = :user_id '
+                        'WHERE user_id IS NULL'
+                    ),
+                    {"user_id": first_user_id}
+                )
 
 
 # ==========================================
@@ -1002,6 +1164,7 @@ with app.app_context():
 
 if __name__ == "__main__":
     app.run(debug=True)
+
 
 
 
