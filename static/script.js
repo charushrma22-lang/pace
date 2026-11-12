@@ -20,7 +20,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (!response.ok) {
             const error = await response.json().catch(() => ({}));
-            throw new Error(error.error || "Something went wrong.");
+            throw new Error(
+    error.message || error.error || "Something went wrong."
+);
         }
 
         if (response.status === 204) return null;

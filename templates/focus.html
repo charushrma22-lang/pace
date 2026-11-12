@@ -1,0 +1,370 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Focus Timer | PACE</title>
+
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background: #171321;
+            color: #f4efff;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 850px;
+            margin: auto;
+            padding: 35px 25px;
+            text-align: center;
+        }
+
+        .back-link {
+            display: block;
+            text-align: left;
+            color: #c4a8ff;
+            text-decoration: none;
+            margin-bottom: 35px;
+        }
+
+        h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #aaa0bd;
+            margin-bottom: 35px;
+        }
+
+        .timer-card {
+            background: #241e32;
+            border: 1px solid #393047;
+            border-radius: 22px;
+            padding: 40px 25px;
+            max-width: 550px;
+            margin: auto;
+        }
+
+        .modes {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 35px;
+        }
+
+        .mode-btn {
+            border: 1px solid #514365;
+            background: transparent;
+            color: #c5bad8;
+            padding: 11px 17px;
+            border-radius: 10px;
+            cursor: pointer;
+        }
+
+        .mode-btn.active {
+            background: #8b6ac7;
+            color: white;
+            border-color: #8b6ac7;
+        }
+
+        .timer {
+            font-size: 76px;
+            font-weight: bold;
+            color: #c4a8ff;
+            margin: 20px 0;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .timer-label {
+            color: #aaa0bd;
+            margin-bottom: 25px;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+        }
+
+        .control-btn {
+            border: none;
+            padding: 13px 25px;
+            border-radius: 10px;
+            font-size: 15px;
+            cursor: pointer;
+        }
+
+        .start-btn {
+            background: #a88be0;
+            color: #171321;
+        }
+
+        .reset-btn {
+            background: #393047;
+            color: white;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-top: 30px;
+        }
+
+        .stat-card {
+            background: #241e32;
+            border: 1px solid #393047;
+            padding: 20px;
+            border-radius: 15px;
+        }
+
+        .stat-card p {
+            color: #aaa0bd;
+            margin-bottom: 10px;
+        }
+
+        .stat-card h2 {
+            color: #c4a8ff;
+            font-size: 27px;
+        }
+
+        @media(max-width: 500px) {
+            .timer {
+                font-size: 58px;
+            }
+
+            .timer-card {
+                padding: 30px 15px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <main class="container">
+
+        <a href="/" class="back-link">← Back to Dashboard</a>
+
+        <h1>Focus Timer</h1>
+        <p class="subtitle">
+            One task at a time. Give your best focus!
+        </p>
+
+        <section class="timer-card">
+
+            <div class="modes">
+                <button class="mode-btn active" data-mode="focus">
+                    Focus
+                </button>
+
+                <button class="mode-btn" data-mode="short">
+                    Short Break
+                </button>
+
+                <button class="mode-btn" data-mode="long">
+                    Long Break
+                </button>
+            </div>
+
+            <p class="timer-label" id="timerLabel">Time to focus</p>
+
+            <div class="timer" id="timer">25:00</div>
+
+            <div class="controls">
+                <button class="control-btn start-btn" id="startBtn">
+                    Start
+                </button>
+
+                <button class="control-btn reset-btn" id="resetBtn">
+                    Reset
+                </button>
+            </div>
+
+        </section>
+
+        <section class="stats">
+
+            <div class="stat-card">
+                <p>Completed Focus Sessions</p>
+                <h2 id="completedSessions">0</h2>
+            </div>
+
+            <div class="stat-card">
+                <p>Total Focus Minutes</p>
+                <h2 id="focusMinutes">0</h2>
+            </div>
+
+        </section>
+
+    </main>
+
+<script>
+    // Timer settings (in seconds)
+    const durations = {
+        focus: 25 * 60,
+        short: 5 * 60,
+        long: 15 * 60
+    };
+
+    let currentMode = "focus";
+    let timeLeft = durations.focus;
+    let timerInterval = null;
+    let isRunning = false;
+
+    const timerDisplay = document.getElementById("timer");
+    const timerLabel = document.getElementById("timerLabel");
+    const startBtn = document.getElementById("startBtn");
+    const resetBtn = document.getElementById("resetBtn");
+    const modeButtons = document.querySelectorAll(".mode-btn");
+
+// Load saved focus statistics
+async function loadFocusStats() {
+    try {
+        const response = await fetch("/api/focus-sessions");
+        if (!response.ok) throw new Error("Could not load statistics");
+
+        const data = await response.json();
+
+        document.getElementById("completedSessions").textContent =
+            data.total_sessions;
+
+        document.getElementById("focusMinutes").textContent =
+            data.total_minutes;
+
+    } catch (error) {
+        console.error(error);
+    }
+}
+
+// Save a completed focus session
+async function saveFocusSession() {
+    try {
+        const response = await fetch("/api/focus-sessions", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                duration_minutes: 25
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error("Could not save focus session");
+        }
+
+        await loadFocusStats();
+
+    } catch (error) {
+        console.error(error);
+        alert("Session finished, but saving failed. Please check the server.");
+    }
+}
+
+
+    // Display timer as MM:SS
+    function updateDisplay() {
+        const minutes = Math.floor(timeLeft / 60);
+        const seconds = timeLeft % 60;
+
+        timerDisplay.textContent =
+            String(minutes).padStart(2, "0") + ":" +
+            String(seconds).padStart(2, "0");
+    }
+
+    // Change timer mode
+    function changeMode(mode) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+        isRunning = false;
+
+        currentMode = mode;
+        timeLeft = durations[mode];
+
+        startBtn.textContent = "Start";
+
+        modeButtons.forEach(button => {
+            button.classList.toggle(
+                "active",
+                button.dataset.mode === mode
+            );
+        });
+
+        timerLabel.textContent =
+            mode === "focus" ? "Time to focus" :
+            mode === "short" ? "Take a short break" :
+            "Take a long break";
+
+        updateDisplay();
+    }
+
+    // Start or pause timer
+    startBtn.addEventListener("click", function () {
+
+        if (isRunning) {
+            clearInterval(timerInterval);
+            timerInterval = null;
+            isRunning = false;
+            startBtn.textContent = "Resume";
+            return;
+        }
+
+        isRunning = true;
+        startBtn.textContent = "Pause";
+
+        timerInterval = setInterval(async function () {
+
+            if (timeLeft > 0) {
+                timeLeft--;
+                updateDisplay();
+            } else {
+                clearInterval(timerInterval);
+                timerInterval = null;
+                isRunning = false;
+                startBtn.textContent = "Start";
+
+                timerLabel.textContent = "Session complete!";
+
+                if (currentMode === "focus") {
+    await saveFocusSession();
+}
+
+alert("Timer finished! Great work!");
+            }
+
+        }, 1000);
+    });
+
+    // Reset timer
+    resetBtn.addEventListener("click", function () {
+        changeMode(currentMode);
+    });
+
+    // Mode buttons
+    modeButtons.forEach(button => {
+        button.addEventListener("click", function () {
+            changeMode(button.dataset.mode);
+        });
+    });
+
+    // Initial display
+    updateDisplay();
+    loadFocusStats();
+</script>
+
+
+</body>
+</html>

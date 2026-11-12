@@ -1,10 +1,22 @@
 
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from flask import Flask, jsonify, render_template, request
+from flask import (
+    Flask, jsonify, render_template, request,
+    redirect, url_for, flash
+)
+
 from flask_sqlalchemy import SQLAlchemy
-from flask_login import LoginManager
+
+from flask_login import (
+    LoginManager, UserMixin, login_user,
+    logout_user, login_required, current_user
+)
+
+from werkzeug.security import (
+    generate_password_hash, check_password_hash
+)
 
 
 # ==========================================
@@ -44,9 +56,37 @@ login_manager.login_view = "login"
 
 @login_manager.user_loader
 def load_user(user_id):
-    return None
+    return db.session.get(User, int(user_id))
+# ==========================================
+# USER MODEL
+# ==========================================
 
+class User(UserMixin, db.Model):
 
+    id = db.Column(db.Integer, primary_key=True)
+
+    username = db.Column(
+        db.String(100),
+        unique=True,
+        nullable=False
+    )
+
+    email = db.Column(
+        db.String(120),
+        unique=True,
+        nullable=False
+    )
+
+    password_hash = db.Column(
+        db.String(256),
+        nullable=False
+    )
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
 # ==========================================
 # 5. HABIT MODEL
 # ==========================================
@@ -63,6 +103,38 @@ class Habit(db.Model):
     )
 
     completed = db.Column(db.Boolean, default=False)
+
+# ==========================================
+# HABIT COMPLETION HISTORY
+# ==========================================
+
+class HabitLog(db.Model):
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    habit_id = db.Column(
+        db.Integer,
+        db.ForeignKey("habit.id"),
+        nullable=False
+    )
+
+    log_date = db.Column(
+        db.Date,
+        nullable=False
+    )
+
+    completed = db.Column(
+        db.Boolean,
+        default=False
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "habit_id",
+            "log_date",
+            name="unique_habit_daily_log"
+        ),
+    )
 
 
 # ==========================================
@@ -94,15 +166,121 @@ class Task(db.Model):
         default=db.func.current_timestamp()
     )
 
+class FocusSession(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    duration_minutes = db.Column(db.Integer, nullable=False)
+    completed_at = db.Column(
+        db.DateTime,
+        default=db.func.current_timestamp()
+    )
+
 
 # ==========================================
 # 7. HOMEPAGE
 # ==========================================
 
 @app.route("/")
+@login_required
 def home():
     return render_template("index.html")
+@app.route("/calendar")
+def calendar():
+    return render_template("calendar.html")
+@app.route("/streaks")
+def streaks():
+    return render_template("streaks.html")
+@app.route("/focus")
+def focus():
+    return render_template("focus.html")
+@app.route("/analytics")
+def analytics():
+    return render_template("analytics.html")
+@app.route("/planner")
+def planner():
+    return render_template("planner.html")
+@app.route("/habits")
+def habits():
+    return render_template("habits.html")
+# ==========================================
+# USER SIGNUP
+# ==========================================
 
+@app.route("/signup", methods=["GET", "POST"])
+def signup():
+
+    if request.method == "POST":
+
+        username = request.form.get("username", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+
+        if not username or not email or not password:
+            flash("Please fill in all fields.")
+            return redirect(url_for("signup"))
+
+        if len(password) < 8:
+            flash("Password must be at least 8 characters.")
+            return redirect(url_for("signup"))
+
+        existing_user = User.query.filter(
+            (User.username == username) |
+            (User.email == email)
+        ).first()
+
+        if existing_user:
+            flash("Username or email already exists.")
+            return redirect(url_for("signup"))
+
+        new_user = User(
+            username=username,
+            email=email
+        )
+
+        new_user.set_password(password)
+
+        db.session.add(new_user)
+        db.session.commit()
+
+        flash("Account created successfully! Please log in.")
+        return redirect(url_for("login"))
+
+    return render_template("signup.html")
+# ==========================================
+# USER LOGIN
+# ==========================================
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+
+    if request.method == "POST":
+
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+
+        user = User.query.filter_by(email=email).first()
+
+        if user and user.check_password(password):
+
+            login_user(user)
+
+            return redirect(url_for("home"))
+
+        flash("Invalid email or password.")
+
+    return render_template("login.html")
+# ==========================================
+# USER LOGOUT
+# ==========================================
+
+@app.route("/logout")
+@login_required
+def logout():
+
+    logout_user()
+
+    flash("You have been logged out successfully.")
+
+    return redirect(url_for("login"))
 
 # ==========================================
 # 8. API HEALTH CHECK
@@ -190,6 +368,8 @@ def add_habit():
 # 11. UPDATE HABIT COMPLETION
 # ==========================================
 
+
+
 @app.route("/api/habits/<int:habit_id>", methods=["PATCH"])
 def update_habit(habit_id):
 
@@ -217,13 +397,36 @@ def update_habit(habit_id):
             "message": "Completed must be true or false."
         }), 400
 
+    # Update today's habit status
     habit.completed = completed
+
+    # Find today's history record
+    today = datetime.now().date()
+
+    log = HabitLog.query.filter_by(
+        habit_id=habit.id,
+        log_date=today
+    ).first()
+
+    # Create a new record if one doesn't exist
+    if log is None:
+        log = HabitLog(
+            habit_id=habit.id,
+            log_date=today,
+            completed=completed
+        )
+        db.session.add(log)
+
+    else:
+        log.completed = completed
+
     db.session.commit()
 
     return jsonify({
         "status": "success",
         "message": "Habit updated successfully!"
     }), 200
+
 
 
 # ==========================================
@@ -248,6 +451,234 @@ def delete_habit(habit_id):
         "status": "success",
         "message": "Habit deleted successfully!"
     }), 200
+# ==========================================
+# 12A. GET HABIT HISTORY FOR A DATE
+# ==========================================
+
+@app.route("/api/habit-history", methods=["GET"])
+def get_habit_history():
+
+    date_value = request.args.get("date")
+
+    if not date_value:
+        return jsonify({
+            "status": "error",
+            "message": "Date is required."
+        }), 400
+
+    try:
+        selected_date = datetime.strptime(
+            date_value, "%Y-%m-%d"
+        ).date()
+    except ValueError:
+        return jsonify({
+            "status": "error",
+            "message": "Invalid date format."
+        }), 400
+
+    logs = HabitLog.query.filter_by(
+        log_date=selected_date
+    ).all()
+
+    return jsonify([
+        {
+            "habit_id": log.habit_id,
+            "completed": log.completed
+        }
+        for log in logs
+    ]), 200
+
+
+# ==========================================
+# 12B. SAVE HABIT COMPLETION FOR A DATE
+# ==========================================
+
+@app.route("/api/habit-history", methods=["POST"])
+def save_habit_history():
+
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return jsonify({
+            "status": "error",
+            "message": "Please send valid JSON data."
+        }), 400
+
+    habit_id = data.get("habit_id")
+    date_value = data.get("date")
+    completed = data.get("completed")
+
+    if not isinstance(habit_id, int) or isinstance(habit_id, bool):
+        return jsonify({
+            "status": "error",
+            "message": "Invalid habit ID."
+        }), 400
+
+    if not isinstance(completed, bool):
+        return jsonify({
+            "status": "error",
+            "message": "Completed must be true or false."
+        }), 400
+
+    try:
+        selected_date = datetime.strptime(
+            date_value, "%Y-%m-%d"
+        ).date()
+    except (ValueError, TypeError):
+        return jsonify({
+            "status": "error",
+            "message": "Invalid date."
+        }), 400
+
+    habit = db.session.get(Habit, habit_id)
+
+    if habit is None:
+        return jsonify({
+            "status": "error",
+            "message": "Habit not found."
+        }), 404
+
+    log = HabitLog.query.filter_by(
+        habit_id=habit_id,
+        log_date=selected_date
+    ).first()
+
+    if log is None:
+        log = HabitLog(
+            habit_id=habit_id,
+            log_date=selected_date,
+            completed=completed
+        )
+        db.session.add(log)
+    else:
+        log.completed = completed
+
+    # Keep the existing dashboard status in sync for today only.
+    if selected_date == datetime.now().date():
+        habit.completed = completed
+
+    db.session.commit()
+
+    return jsonify({
+        "status": "success",
+        "message": "Habit history saved successfully."
+    }), 200
+
+# ==========================================
+# STREAKS AND REWARDS API
+# ==========================================
+
+@app.route("/api/streaks", methods=["GET"])
+def get_streaks():
+
+    today = datetime.now().date()
+
+    # Get all completed habit logs
+    logs = HabitLog.query.filter_by(completed=True).all()
+
+    # Group completed dates by habit
+    all_dates = set()
+    habit_dates = {}
+
+    for log in logs:
+        all_dates.add(log.log_date)
+
+        if log.habit_id not in habit_dates:
+            habit_dates[log.habit_id] = set()
+
+        habit_dates[log.habit_id].add(log.log_date)
+
+    # Calculate overall current streak
+    start_date = today
+
+    if today not in all_dates:
+        start_date = today - timedelta(days=1)
+
+    current_streak = 0
+    check_date = start_date
+
+    while check_date in all_dates:
+        current_streak += 1
+        check_date -= timedelta(days=1)
+
+    # Calculate longest overall streak
+    longest_streak = 0
+    streak = 0
+    previous_date = None
+
+    for log_date in sorted(all_dates):
+        if previous_date is not None:
+            if log_date == previous_date + timedelta(days=1):
+                streak += 1
+            else:
+                streak = 1
+        else:
+            streak = 1
+
+        longest_streak = max(longest_streak, streak)
+        previous_date = log_date
+
+    # Calculate individual habit streaks
+    habit_streaks = []
+
+    habits = Habit.query.all()
+
+    for habit in habits:
+        dates = habit_dates.get(habit.id, set())
+
+        habit_start = today
+        if today not in dates:
+            habit_start = today - timedelta(days=1)
+
+        individual_streak = 0
+        check_date = habit_start
+
+        while check_date in dates:
+            individual_streak += 1
+            check_date -= timedelta(days=1)
+
+        habit_streaks.append({
+            "habit_id": habit.id,
+            "habit_name": habit.name,
+            "current_streak": individual_streak
+        })
+
+    # Calculate unlocked rewards
+    achievements = [
+        {
+            "name": "First Step",
+            "description": "Complete your first habit",
+            "unlocked": len(logs) >= 1
+        },
+        {
+            "name": "Getting Started",
+            "description": "Reach a 3-day streak",
+            "unlocked": longest_streak >= 3
+        },
+        {
+            "name": "Consistency Star",
+            "description": "Reach a 7-day streak",
+            "unlocked": longest_streak >= 7
+        },
+        {
+            "name": "Two Week Champion",
+            "description": "Reach a 14-day streak",
+            "unlocked": longest_streak >= 14
+        },
+        {
+            "name": "Monthly Master",
+            "description": "Reach a 30-day streak",
+            "unlocked": longest_streak >= 30
+        }
+    ]
+
+    return jsonify({
+        "current_streak": current_streak,
+        "longest_streak": longest_streak,
+        "total_completions": len(logs),
+        "habit_streaks": habit_streaks,
+        "achievements": achievements
+    })
 
 
 # ==========================================
@@ -359,7 +790,7 @@ def add_task():
 # ==========================================
 
 @app.route("/api/tasks/<int:task_id>", methods=["PATCH"])
-def update_task(task_id):
+def update_apptask(task_id):
 
     task = db.session.get(Task, task_id)
 
@@ -458,6 +889,103 @@ def delete_task(task_id):
         "status": "success",
         "message": "Task deleted successfully!"
     }), 200
+
+
+# ==========================================
+# FOCUS SESSION API
+# ==========================================
+
+@app.route("/api/focus-sessions", methods=["GET", "POST"])
+def focus_sessions():
+
+    if request.method == "POST":
+        data = request.get_json()
+
+        duration = data.get("duration_minutes")
+
+        if not isinstance(duration, int) or isinstance(duration, bool) or duration <= 0:
+            return jsonify({"error": "Invalid session duration"}), 400
+
+        session = FocusSession(duration_minutes=duration)
+
+        db.session.add(session)
+        db.session.commit()
+
+        return jsonify({
+            "message": "Focus session saved successfully",
+            "id": session.id
+        }), 201
+
+    sessions = FocusSession.query.order_by(
+        FocusSession.completed_at.desc()
+    ).all()
+
+    total_sessions = len(sessions)
+    total_minutes = sum(
+        session.duration_minutes for session in sessions
+    )
+
+    return jsonify({
+        "total_sessions": total_sessions,
+        "total_minutes": total_minutes
+    })
+
+
+# ==========================================
+# ANALYTICS API
+# ==========================================
+
+@app.route("/api/analytics", methods=["GET"])
+def get_analytics():
+
+    today = datetime.now().date()
+
+    # Total habits
+    total_habits = Habit.query.count()
+
+    # Total completed habit logs
+    habit_completions = HabitLog.query.filter_by(
+        completed=True
+    ).count()
+
+    # Task statistics
+    total_tasks = Task.query.count()
+
+    completed_tasks = Task.query.filter_by(
+        completed=True
+    ).count()
+
+    # Focus statistics
+    focus_sessions = FocusSession.query.all()
+
+    focus_minutes = sum(
+        session.duration_minutes for session in focus_sessions
+    )
+
+    # Weekly habit progress
+    weekly_progress = []
+
+    for i in range(6, -1, -1):
+        day = today - timedelta(days=i)
+
+        completed_count = HabitLog.query.filter_by(
+            log_date=day,
+            completed=True
+        ).count()
+
+        weekly_progress.append({
+            "day": day.strftime("%a"),
+            "completed": completed_count
+        })
+
+    return jsonify({
+        "total_habits": total_habits,
+        "habit_completions": habit_completions,
+        "tasks_completed": completed_tasks,
+        "total_tasks": total_tasks,
+        "focus_minutes": focus_minutes,
+        "weekly_progress": weekly_progress
+    })
 
 
 # ==========================================

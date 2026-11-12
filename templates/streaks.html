@@ -1,0 +1,247 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Streaks & Rewards | PACE</title>
+
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background: #171321;
+            color: #f4efff;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1150px;
+            margin: auto;
+            padding: 35px 25px;
+        }
+
+        .back-link {
+            color: #c4a8ff;
+            text-decoration: none;
+            display: inline-block;
+            margin-bottom: 28px;
+        }
+
+        h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #aaa0bd;
+            margin-bottom: 30px;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 18px;
+            margin-bottom: 35px;
+        }
+
+        .stat-card, .section-card {
+            background: #241e32;
+            border: 1px solid #393047;
+            border-radius: 18px;
+            padding: 24px;
+        }
+
+        .stat-card p {
+            color: #aaa0bd;
+            margin-bottom: 12px;
+        }
+
+        .stat-card h2 {
+            font-size: 34px;
+            color: #c4a8ff;
+        }
+
+        .section-title {
+            font-size: 22px;
+            margin-bottom: 18px;
+        }
+
+        .habit-list, .reward-list {
+            display: grid;
+            gap: 14px;
+        }
+
+        .habit-item, .reward-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 15px;
+            padding: 17px;
+            background: #302840;
+            border-radius: 12px;
+        }
+
+        .habit-item span, .reward-item p {
+            color: #b9afc9;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+
+        .reward-item.locked {
+            opacity: 0.5;
+        }
+
+        .reward-status {
+            color: #c4a8ff;
+            font-size: 13px;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+
+        .section-card {
+            margin-bottom: 25px;
+        }
+
+        .empty-message {
+            color: #aaa0bd;
+            padding: 10px 0;
+        }
+
+        @media (max-width: 650px) {
+            .stats {
+                grid-template-columns: 1fr;
+            }
+
+            .habit-item, .reward-item {
+                align-items: flex-start;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <main class="container">
+
+        <a href="/" class="back-link">← Back to Dashboard</a>
+
+        <h1>Streaks & Rewards</h1>
+        <p class="subtitle">
+            Celebrate your consistency. Every small step counts!
+        </p>
+
+        <section class="stats">
+
+            <div class="stat-card">
+                <p>Current Streak</p>
+                <h2 id="currentStreak">0 days</h2>
+            </div>
+
+            <div class="stat-card">
+                <p>Longest Streak</p>
+                <h2 id="longestStreak">0 days</h2>
+            </div>
+
+            <div class="stat-card">
+                <p>Total Completions</p>
+                <h2 id="totalCompletions">0</h2>
+            </div>
+
+        </section>
+
+        <section class="section-card">
+            <h2 class="section-title">Your Habit Streaks</h2>
+            <div class="habit-list" id="habitList">
+                <p class="empty-message">Loading habits...</p>
+            </div>
+        </section>
+
+        <section class="section-card">
+            <h2 class="section-title">Your Rewards</h2>
+            <div class="reward-list" id="rewardList">
+                <p class="empty-message">Loading rewards...</p>
+            </div>
+        </section>
+
+    </main>
+
+    <script>
+        async function loadStreaks() {
+            const habitList = document.getElementById("habitList");
+            const rewardList = document.getElementById("rewardList");
+
+            try {
+                const response = await fetch("/api/streaks");
+
+                if (!response.ok) {
+                    throw new Error("Could not load streak data.");
+                }
+
+                const data = await response.json();
+
+                document.getElementById("currentStreak").textContent =
+                    data.current_streak + " days";
+
+                document.getElementById("longestStreak").textContent =
+                    data.longest_streak + " days";
+
+                document.getElementById("totalCompletions").textContent =
+                    data.total_completions;
+
+                if (data.habit_streaks.length === 0) {
+                    habitList.innerHTML =
+                        '<p class="empty-message">No habits yet. Add your first habit!</p>';
+                } else {
+                    habitList.innerHTML = data.habit_streaks.map(habit => `
+                        <div class="habit-item">
+                            <div>
+                                <strong>${escapeHTML(habit.habit_name)}</strong>
+                                <p>Your current streak</p>
+                            </div>
+                            <strong>${habit.current_streak} days</strong>
+                        </div>
+                    `).join("");
+                }
+
+                rewardList.innerHTML = data.achievements.map(reward => `
+                    <div class="reward-item ${reward.unlocked ? "" : "locked"}">
+                        <div>
+                            <strong>${escapeHTML(reward.name)}</strong>
+                            <p>${escapeHTML(reward.description)}</p>
+                        </div>
+                        <span class="reward-status">
+                            ${reward.unlocked ? "UNLOCKED" : "LOCKED"}
+                        </span>
+                    </div>
+                `).join("");
+
+            } catch (error) {
+                habitList.innerHTML =
+                    '<p class="empty-message">Could not load streaks. Please refresh.</p>';
+
+                rewardList.innerHTML =
+                    '<p class="empty-message">Could not load rewards.</p>';
+
+                console.error(error);
+            }
+        }
+
+        function escapeHTML(value) {
+            const element = document.createElement("span");
+            element.textContent = value ?? "";
+            return element.innerHTML;
+        }
+
+        loadStreaks();
+    </script>
+
+</body>
+</html>

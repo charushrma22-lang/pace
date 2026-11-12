@@ -1,0 +1,128 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Habits | PACE</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="{{ url_for('static', filename='script.js') }}" defer></script>
+</head>
+
+<body>
+    <div class="app-container">
+
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="brand-icon">
+                    <i data-lucide="activity"></i>
+                </div>
+                PACE<span class="brand-dot">.</span>
+            </div>
+
+            <p class="workspace-label">WORKSPACE</p>
+
+            <nav class="sidebar-nav">
+                <a href="/" class="nav-link">
+                    <i data-lucide="layout-dashboard"></i>
+                    <span>Dashboard</span>
+                </a>
+
+                <a href="/habits" class="nav-link active">
+                    <i data-lucide="check-square"></i>
+                    <span>My Habits</span>
+                </a>
+
+                <a href="/planner" class="nav-link">
+                    <i data-lucide="list-todo"></i>
+                    <span>Daily Planner</span>
+                </a>
+
+                <a href="/calendar" class="nav-link">
+                    <i data-lucide="calendar-days"></i>
+                    <span>Calendar</span>
+                </a>
+
+                <a href="/analytics" class="nav-link">
+                    <i data-lucide="chart-no-axes-combined"></i>
+                    <span>Analytics</span>
+                </a>
+
+                <p class="workspace-label second-label">PRODUCTIVITY</p>
+
+                <a href="/focus" class="nav-link">
+                    <i data-lucide="timer"></i>
+                    <span>Focus Timer</span>
+                </a>
+
+                <a href="/streaks" class="nav-link">
+                    <i data-lucide="flame"></i>
+                    <span>Streaks & Rewards</span>
+                </a>
+            </nav>
+        </aside>
+
+        <main class="main-content">
+
+            <header class="topbar">
+                <div class="breadcrumb">
+                    <span>Workspace</span>
+                    <i data-lucide="chevron-right"></i>
+                    <strong>My Habits</strong>
+                </div>
+            </header>
+
+            <section class="dashboard">
+
+                <div class="welcome-section">
+                    <div>
+                        <p class="eyebrow">BUILD BETTER ROUTINES</p>
+                        <h1>My <span>Habits</span></h1>
+                        <p class="welcome-subtitle">
+                            Small steps every day lead to big changes.
+                        </p>
+                    </div>
+                </div>
+
+                <section class="panel habits-panel">
+
+                    <div class="panel-header">
+                        <div>
+                            <h3>Your Daily Habits</h3>
+                            <p>Create, track and complete your daily habits.</p>
+                        </div>
+
+                        <button class="primary-button" id="add-habit-btn" type="button">
+                            <i data-lucide="plus"></i>
+                            Add Habit
+                        </button>
+                    </div>
+
+                    <div class="empty-state">
+                        <div class="empty-icon">
+                            <i data-lucide="sprout"></i>
+                        </div>
+
+                        <h4>Ready to build a routine?</h4>
+                        <p>
+                            Add your first habit and start making progress
+                            one day at a time.
+                        </p>
+                    </div>
+
+                </section>
+
+            </section>
+        </main>
+    </div>
+
+    <script>
+        lucide.createIcons();
+    </script>
+</body>
+</html>
